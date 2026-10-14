@@ -1,0 +1,17 @@
+.idea/
+.venv/
+.uv-cache/
+.uv-python/
+.docker-local/
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage.xml
+celerybeat-schedule*
+dist/
+*.egg-info/

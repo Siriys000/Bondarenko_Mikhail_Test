@@ -1,0 +1,80 @@
+name: deribit-prices
+
+x-app: &app
+  build: .
+  image: deribit-prices:local
+  environment:
+    DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-prices}:${POSTGRES_PASSWORD:-prices_local}@postgres:5432/${POSTGRES_DB:-prices}
+    REDIS_URL: redis://redis:6379/0
+    DERIBIT_BASE_URL: ${DERIBIT_BASE_URL:-https://www.deribit.com/api/v2}
+    HTTP_TIMEOUT_SECONDS: ${HTTP_TIMEOUT_SECONDS:-10}
+    COLLECTION_MAX_RETRIES: ${COLLECTION_MAX_RETRIES:-3}
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-prices}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-prices_local}
+      POSTGRES_DB: ${POSTGRES_DB:-prices}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *app
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  worker:
+    <<: *app
+    command: ["python", "-m", "price_service.worker", "worker", "--loglevel=INFO", "--concurrency=2"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  beat:
+    <<: *app
+    command: ["python", "-m", "price_service.worker", "beat", "--loglevel=INFO", "--schedule=/app/run/celerybeat-schedule"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

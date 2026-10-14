@@ -1,0 +1,41 @@
+name: QA
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: prices
+          POSTGRES_PASSWORD: prices_test
+          POSTGRES_DB: prices_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U prices -d prices_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://prices:prices_test@localhost:5432/prices_test
+      TEST_DATABASE_URL: postgresql+asyncpg://prices:prices_test@localhost:5432/prices_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.11.23"
+          enable-cache: true
+      - run: uv sync --frozen --python 3.12
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run alembic upgrade head
+      - run: uv run alembic check
+      - run: uv run pytest --cov --cov-report=term-missing --cov-fail-under=85
+      - run: docker compose config --quiet
+      - run: docker build -t deribit-prices:ci .
